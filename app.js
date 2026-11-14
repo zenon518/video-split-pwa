@@ -129,11 +129,38 @@
     say('ファイルとして保存しました。「ファイル」アプリを確認してください。');
   }
 
+  // iPhoneの「ファイル」からMP4/MOV/M4Vを選ぶ。写真ライブラリ経由は不要。
+  fileInput.addEventListener('click', function () {
+    // 同じ動画の再選択でも change が届くようにする。
+    fileInput.value = '';
+    say('「ファイル」から動画を選んでください。選択後、自動で解析を開始します。');
+  });
+  fileInput.addEventListener('cancel', function () {
+    say('ファイルが選択されませんでした。分割処理は開始していません。', true);
+  });
+  fileInput.addEventListener('input', function () {
+    // OSがchangeを通知する前でも、選択状態が分かるようにする。
+    if (fileInput.files && fileInput.files.length) {
+      var selected = fileInput.files[0];
+      say('動画の選択を受け取りました：' + selected.name + '（' + fmtSize(selected.size) + '）');
+    }
+  });
   fileInput.addEventListener('change', function () {
     var f = fileInput.files && fileInput.files[0];
-    if (!f) return;
+    if (!f) {
+      say('ファイルを受け取れませんでした。分割処理はまだ始まっていません。', true);
+      return;
+    }
+    // accept を付けないことでiOSのファイルブラウザを使いやすくする。
+    // 代わりにアプリ内で動画形式を確認する。
+    if (!/\.(mp4|mov|m4v)$/i.test(f.name) &&
+        !/^(video\/mp4|video\/quicktime|video\/x-m4v)$/i.test(f.type)) {
+      say('MP4・MOV・M4Vの動画ファイルを選んでください。', true);
+      return;
+    }
     state.parts.forEach(function (p) { if (p.url) URL.revokeObjectURL(p.url); });
     state.parts = []; state.info = null; state.file = f;
+    say('動画を受け取りました：' + f.name + '（' + fmtSize(f.size) + '）。解析します…');
     run();
   });
   Array.prototype.forEach.call(document.querySelectorAll('input[name="mode"]'), function (r) {

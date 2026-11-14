@@ -61,8 +61,11 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
 .btn:focus-visible { outline: 3px solid var(--cut); outline-offset: 2px; }
 .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 600; margin: 0; }
 .btn.small { padding: 9px 14px; width: auto; font-size: 14px; }
-#file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
-#file:focus-visible + .btn { outline: 3px solid var(--cut); outline-offset: 2px; }
+/* iPhoneでは見えないファイル入力 + label 経由の選択を使わず、
+   OS標準のファイル入力そのものを表示して直接押してもらう。 */
+#file { display: block; width: 100%; min-height: 54px; padding: 12px; border: 2px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--ink); font: inherit; cursor: pointer; }
+#file::file-selector-button { margin-right: 10px; padding: 9px 12px; border: 0; border-radius: 8px; background: var(--ink); color: var(--on-ink); font: inherit; font-size: 14px; font-weight: 700; }
+#file:focus-visible { outline: 3px solid var(--cut); outline-offset: 2px; }
 
 .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .fact { min-width: 0; }
@@ -96,7 +99,7 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
   <header>
     <h1>動画ぶんかつ</h1>
     <p class="sub">長い動画を、5分以内の動画に自動で分けます。動画は端末の外に出ません。</p>
-    <p class="sub">修正版 v2 ／ 分割中の進み具合を表示します</p>
+    <p class="sub">ファイル版 v5 ／ iPhone標準の選択ボタンを使用</p>
   </header>
 
   <section class="panel" aria-label="分け方と動画の選択">
@@ -107,8 +110,9 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
       <input type="radio" name="mode" id="mode-three" value="three">
       <label for="mode-three">3等分</label>
     </div>
-    <input id="file" type="file" accept="video/*,.mov,.mp4,.m4v">
-    <label for="file" class="btn" id="pickBtn">動画を選ぶ</label>
+    <label for="file" class="label">動画ファイルを選ぶ（iPhone標準のボタン）</label>
+    <input id="file" type="file" aria-label="動画ファイルを選ぶ">
+    <p class="note">上の標準ボタンから「ファイルを選択」を選んでください。MP4・MOV・M4Vに対応。動画はアップロードされません。</p>
     <p class="msg" id="msg" role="status" hidden></p>
     <p class="note">長い動画の分割中は、この画面を開いたままにしてください。</p>
   </section>
@@ -134,7 +138,7 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
     </ol>
   </section>
 </main>
-<script src="split.js?v=2"></script>
-<script src="app.js?v=2"></script>
+<script src="split.js?v=5"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
