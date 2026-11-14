@@ -302,7 +302,7 @@
     return out;
   }
 
-  function buildTrak(info, tr, r, rel, use64, base) {
+  function buildTrak(info, tr, r, chunkRel, chunkCounts, use64, base) {
     var buf = info.moovBuf, refs = tr.refs, i0 = r.i0, i1 = r.i1, n = i1 - i0, i;
 
     var mediaDur = 0;
@@ -334,19 +334,29 @@
       for (i = i0; i < i1; i++) if (tr.sync[i]) syncList.push(i - i0 + 1);
       parts.push(box('stss', [u32s([0, syncList.length]), u32s(syncList)]));
     }
-    parts.push(box('stsc', [u32s([0, 1, 1, 1, 1])]));
+    // 連続したサンプルは同じチャンクにまとめる。
+    // 元の1サンプル=1チャンク方式に比べ、長い動画の管理情報とメモリ使用量を削減する。
+    var stscRows = [];
+    var previousCount = -1;
+    for (i = 0; i < chunkCounts.length; i++) {
+      if (chunkCounts[i] !== previousCount) {
+        stscRows.push(i + 1, chunkCounts[i], 1);
+        previousCount = chunkCounts[i];
+      }
+    }
+    parts.push(box('stsc', [u32s([0, stscRows.length / 3]), u32s(stscRows)]));
     var sizes = new Array(n);
     for (i = 0; i < n; i++) sizes[i] = tr.size[i0 + i];
     parts.push(box('stsz', [u32s([0, 0, n]), u32s(sizes)]));
     if (use64) {
-      var co = new Uint8Array(8 + n * 8), cdv = dvOf(co);
-      cdv.setUint32(4, n);
-      for (i = 0; i < n; i++) cdv.setBigUint64(8 + i * 8, BigInt(base + rel[i]));
+      var co = new Uint8Array(8 + chunkRel.length * 8), cdv = dvOf(co);
+      cdv.setUint32(4, chunkRel.length);
+      for (i = 0; i < chunkRel.length; i++) cdv.setBigUint64(8 + i * 8, BigInt(base + chunkRel[i]));
       parts.push(box('co64', [co]));
     } else {
-      var offs = new Array(n);
-      for (i = 0; i < n; i++) offs[i] = base + rel[i];
-      parts.push(box('stco', [u32s([0, n]), u32s(offs)]));
+      var offs = new Array(chunkRel.length);
+      for (i = 0; i < chunkRel.length; i++) offs[i] = base + chunkRel[i];
+      parts.push(box('stco', [u32s([0, offs.length]), u32s(offs)]));
     }
     var stbl = box('stbl', parts);
 
@@ -408,18 +418,41 @@
     order.sort(function (a, b) { return src[a] - src[b]; });
 
     var rels = ranges.map(function (r) { return new Float64Array(r.i1 - r.i0); });
+    var chunkOffsets = ranges.map(function () { return []; });
+    var chunkCounts = ranges.map(function () { return []; });
     var slices = [], cursor = 0, curStart = -1, curEnd = -1;
+    var lastTrack = -1, lastIndex = -1, lastEnd = -1;
     for (k = 0; k < total_n; k++) {
-      var j = order[k];
-      rels[who[j]][idx[j]] = cursor;
-      if (src[j] === curEnd) curEnd += len[j];
+      var j = order[k], trNo = who[j], sampleNo = idx[j], byteAt = src[j];
+      rels[trNo][sampleNo] = cursor;
+      if (trNo === lastTrack && sampleNo === lastIndex + 1 && byteAt === lastEnd) {
+        chunkCounts[trNo][chunkCounts[trNo].length - 1]++;
+      } else {
+        chunkOffsets[trNo].push(cursor);
+        chunkCounts[trNo].push(1);
+      }
+      lastTrack = trNo; lastIndex = sampleNo; lastEnd = byteAt + len[j];
+      if (byteAt === curEnd) curEnd += len[j];
       else {
         if (curStart >= 0) slices.push([curStart, curEnd]);
-        curStart = src[j]; curEnd = src[j] + len[j];
+        curStart = byteAt; curEnd = byteAt + len[j];
       }
       cursor += len[j];
+      // メインスレッドを定期的に返し、iPhoneの画面更新と操作を妨げない。
+      if ((k & 8191) === 8191) await new Promise(function (resolve) { setTimeout(resolve, 0); });
     }
     if (curStart >= 0) slices.push([curStart, curEnd]);
+    // ごく一部のファイルではサンプルの格納順が再生順と異なる。
+    // その場合だけ従来の1サンプル1チャンク方式に戻して正しい順序を維持する。
+    ranges.forEach(function (r, ri) {
+      for (var si = r.i0 + 1; si < r.i1; si++) {
+        if (r.tr.off[si] < r.tr.off[si - 1]) {
+          chunkOffsets[ri] = Array.from(rels[ri]);
+          chunkCounts[ri] = new Array(rels[ri].length).fill(1);
+          break;
+        }
+      }
+    });
     var payload = cursor;
 
     var ftyp = info.ftyp;
@@ -435,7 +468,7 @@
       var moovParts = [], maxDur = 0;
       var mv = info.moovBuf.slice(info.mvhd.start, info.mvhd.end);
       var trakBoxes = ranges.map(function (r, ri) {
-        var res = buildTrak(info, r.tr, r, rels[ri], use64, base);
+        var res = buildTrak(info, r.tr, r, chunkOffsets[ri], chunkCounts[ri], use64, base);
         if (res.movieDur > maxDur) maxDur = res.movieDur;
         return res.trak;
       });
@@ -466,9 +499,15 @@
     };
   }
 
-  async function build(info, segs, baseName) {
+  async function build(info, segs, baseName, onProgress) {
     var out = [];
-    for (var i = 0; i < segs.length; i++) out.push(await buildOne(info, segs[i], i, segs.length, baseName || 'video'));
+    for (var i = 0; i < segs.length; i++) {
+      if (onProgress) onProgress(i, segs.length);
+      // ステータス表示後に1フレーム画面更新させてから、次のパートを処理する。
+      await new Promise(function (resolve) { setTimeout(resolve, 0); });
+      out.push(await buildOne(info, segs[i], i, segs.length, baseName || 'video'));
+    }
+    if (onProgress) onProgress(segs.length, segs.length);
     return out;
   }
 

@@ -1,5 +1,5 @@
 // オフラインでも開けるように、アプリ本体だけを保存しておく。動画は扱わない。
-var CACHE = 'video-split-v1';
+var CACHE = 'video-split-v2';
 var FILES = ['./', 'index.html', 'app.js', 'split.js', 'manifest.webmanifest',
   'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 

@@ -45,8 +45,13 @@
         say('この動画は ' + fmtTime(info.duration) + ' で、5分以内です。分ける必要はありません。');
         return;
       }
-      say('分割しています…');
-      var built = await VideoSplit.build(info, segs, baseName(state.file.name));
+      say('分割準備ができました。');
+      var built = await VideoSplit.build(info, segs, baseName(state.file.name), function (done, total) {
+        if (token === state.token) {
+          say(done === total ? '分割が完了しました。結果を表示しています…' :
+            '分割中：' + (done + 1) + ' / ' + total + ' 本目を処理しています…');
+        }
+      });
       if (token !== state.token) return;
       state.parts = built.map(function (p) {
         return { file: new File([p.blob], p.name, { type: p.mime }), blob: p.blob, name: p.name, start: p.start, dur: p.dur, size: p.size, url: null };

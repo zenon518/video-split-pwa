@@ -96,6 +96,7 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
   <header>
     <h1>動画ぶんかつ</h1>
     <p class="sub">長い動画を、5分以内の動画に自動で分けます。動画は端末の外に出ません。</p>
+    <p class="sub">修正版 v2 ／ 分割中の進み具合を表示します</p>
   </header>
 
   <section class="panel" aria-label="分け方と動画の選択">
@@ -109,6 +110,7 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
     <input id="file" type="file" accept="video/*,.mov,.mp4,.m4v">
     <label for="file" class="btn" id="pickBtn">動画を選ぶ</label>
     <p class="msg" id="msg" role="status" hidden></p>
+    <p class="note">長い動画の分割中は、この画面を開いたままにしてください。</p>
   </section>
 
   <section class="panel" id="result" aria-label="分割結果" hidden>
@@ -132,7 +134,7 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
     </ol>
   </section>
 </main>
-<script src="split.js"></script>
-<script src="app.js"></script>
+<script src="split.js?v=2"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>
