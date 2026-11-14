@@ -5,6 +5,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var fileInput = $('file'), msg = $('msg'), result = $('result');
   var state = { file: null, info: null, token: 0, parts: [] };
+  var sharing = false;
 
   function fmtTime(sec) {
     sec = Math.max(0, Math.round(sec));
@@ -94,39 +95,76 @@
       var s = document.createElement('span');
       s.textContent = fmtTime(p.start) + ' から ・ ' + fmtSize(p.size);
       info2.appendChild(b); info2.appendChild(s);
+      if (!p.url) p.url = URL.createObjectURL(p.blob);
+      var actions = document.createElement('div');
+      actions.className = 'save-actions';
+      var download = document.createElement('a');
+      download.className = 'btn small';
+      download.href = p.url;
+      download.download = p.name;
+      download.textContent = 'ファイルに保存';
+      download.addEventListener('click', function () {
+        saveStatus('パート' + (i + 1) + 'のダウンロードを要求しました。Safariのダウンロード一覧をご確認ください。反応がない場合は「動画を開く」をお試しください。');
+      });
+      actions.appendChild(download);
+      var preview = document.createElement('a');
+      preview.href = p.url;
+      preview.target = '_blank';
+      preview.rel = 'noopener';
+      preview.textContent = '動画を開く';
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'btn ghost small';
-      btn.textContent = '保存';
+      btn.textContent = '共有して保存';
       btn.addEventListener('click', function () { save([p]); });
-      li.appendChild(info2); li.appendChild(btn);
+      actions.appendChild(btn);
+      actions.appendChild(preview);
+      li.appendChild(info2); li.appendChild(actions);
       ul.appendChild(li);
     });
-    $('saveAll').textContent = n + '本をまとめて保存';
+    $('saveAll').textContent = n + '本をまとめて共有';
+    saveStatus('各パートの「ファイルに保存」で1本ずつ保存できます。写真アプリに入れる場合は「共有して保存」を押してください。');
     result.hidden = false;
   }
 
-  // 共有画面を開く。開けない環境ではファイルとしてダウンロードする。
+  function saveStatus(text, isError) {
+    var status = $('saveStatus');
+    status.hidden = !text;
+    status.textContent = text || '';
+    status.className = 'msg' + (isError ? ' error' : '');
+  }
+
+  // 共有とダウンロードは独立させる。失敗後に自動クリックしない。
   async function save(parts) {
+    if (!parts.length) {
+      saveStatus('保存する動画がありません。動画を選び直してください。', true);
+      return;
+    }
+    if (sharing) {
+      saveStatus('共有画面を準備中です。開いている共有画面を閉じるか、「ファイルに保存」をお使いください。');
+      return;
+    }
+    var token = state.token;
     var files = parts.map(function (p) { return p.file; });
     try {
-      if (navigator.canShare && navigator.canShare({ files: files })) {
-        await navigator.share({ files: files });
+      if (!navigator.share || !navigator.canShare || !navigator.canShare({ files: files })) {
+        saveStatus('この環境ではこの動画を共有できません。各パートの「ファイルに保存」、または「動画を開く」をお使いください。', true);
         return;
       }
+      sharing = true;
+      saveStatus('共有画面を開いています。表示されない場合は「ファイルに保存」をお使いください。');
+      await navigator.share({ files: files });
+      if (token === state.token) saveStatus('共有画面の操作が終了しました。選択した保存先で動画をご確認ください。');
     } catch (e) {
-      if (e && e.name === 'AbortError') return;
+      if (token !== state.token) return;
+      var code = e && e.name ? e.name : 'Error';
+      saveStatus(code === 'AbortError' ?
+        '共有が中断されました。保存は確認できていません。「ファイルに保存」なら共有画面を使わずに保存できます。' :
+        '共有画面を開けませんでした（' + code + '）。各パートの「ファイルに保存」をお使いください。', true);
       console.error(e);
+    } finally {
+      sharing = false;
     }
-    parts.forEach(function (p, i) {
-      setTimeout(function () {
-        if (!p.url) p.url = URL.createObjectURL(p.blob);
-        var a = document.createElement('a');
-        a.href = p.url; a.download = p.name;
-        document.body.appendChild(a); a.click(); a.remove();
-      }, i * 400);
-    });
-    say('ファイルとして保存しました。「ファイル」アプリを確認してください。');
   }
 
   // iPhoneの「ファイル」からMP4/MOV/M4Vを選ぶ。写真ライブラリ経由は不要。
