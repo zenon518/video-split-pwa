@@ -1,5 +1,5 @@
-var CACHE = 'video-split-v7';
-var FILES = ['./', 'index.html', 'app.js?v=7', 'split.js?v=7', 'export-store.js?v=7',
+var CACHE = 'video-split-v8';
+var FILES = ['./', 'index.html', 'app.js?v=8', 'split.js?v=8', 'export-store.js?v=8',
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
