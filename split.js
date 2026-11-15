@@ -1,7 +1,7 @@
 /*
  * split.js — MP4 / MOV を再エンコードなしで分割する。
  * キーフレームの位置で切り、各パートは単体で再生できるファイルになる。
- * 動画データは Blob のスライスとして参照するだけなので、メモリを大きく使わない。
+ * 動画データは元ファイル内の範囲で表し、巨大な結合Blobを作らない。
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -484,18 +484,18 @@
     if (mdatHdrLen === 8) { hdv.setUint32(0, payload + 8); setFourcc(hdr, 4, 'mdat'); }
     else { hdv.setUint32(0, 1); setFourcc(hdr, 4, 'mdat'); hdv.setBigUint64(8, BigInt(payload + 16)); }
 
-    var blobParts = [ftyp, moov, hdr];
+    // Keep a write plan: do not create a composite Blob for the entire video.
     for (k = 0; k < slices.length; k++) {
       if (slices[k][0] < 0 || slices[k][1] > file.size || slices[k][1] < slices[k][0]) {
         throw fail('パート' + (index + 1) + 'の動画データが元ファイルの範囲外です。元動画が完全に端末へ保存されているか確認してください。');
       }
-      blobParts.push(file.slice(slices[k][0], slices[k][1]));
+
     }
 
     var ext = info.isQuickTime ? 'mov' : 'mp4';
     var mime = info.isQuickTime ? 'video/quicktime' : 'video/mp4';
     return {
-      blob: new Blob(blobParts, { type: mime }),
+      source: file, headers: [ftyp, moov, hdr], ranges: slices,
       name: baseName + '_part' + (index + 1) + 'of' + total + '.' + ext,
       mime: mime,
       start: seg.start,
