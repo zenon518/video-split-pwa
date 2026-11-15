@@ -485,7 +485,12 @@
     else { hdv.setUint32(0, 1); setFourcc(hdr, 4, 'mdat'); hdv.setBigUint64(8, BigInt(payload + 16)); }
 
     var blobParts = [ftyp, moov, hdr];
-    for (k = 0; k < slices.length; k++) blobParts.push(file.slice(slices[k][0], slices[k][1]));
+    for (k = 0; k < slices.length; k++) {
+      if (slices[k][0] < 0 || slices[k][1] > file.size || slices[k][1] < slices[k][0]) {
+        throw fail('パート' + (index + 1) + 'の動画データが元ファイルの範囲外です。元動画が完全に端末へ保存されているか確認してください。');
+      }
+      blobParts.push(file.slice(slices[k][0], slices[k][1]));
+    }
 
     var ext = info.isQuickTime ? 'mov' : 'mp4';
     var mime = info.isQuickTime ? 'video/quicktime' : 'video/mp4';

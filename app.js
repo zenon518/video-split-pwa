@@ -54,18 +54,43 @@
         }
       });
       if (token !== state.token) return;
-      state.parts = built.map(function (p) {
-        return { file: new File([p.blob], p.name, { type: p.mime }), blob: p.blob, name: p.name, start: p.start, dur: p.dur, size: p.size, url: null };
-      });
+      await ensureDownloadWorker();
+      var prepared = await ExportStore.prepare(built, function (part, total, done, size) {
+        if (token === state.token) say('保存用ファイルを書き出しています：' + part + ' / ' + total + ' 本目・' + Math.round(done / size * 100) + '％');
+      }, function () { return token !== state.token; });
+      if (token !== state.token) {
+        await ExportStore.remove(prepared[0].exportId);
+        return;
+      }
+      state.parts = prepared;
       render(info, segs.length);
       var over = state.parts.some(function (p) { return p.dur > MAX_SEC; });
       say(over ? '5分を超えるパートがあります。「5分以内に自動」を選ぶと、すべて5分以内になります。' : '');
     } catch (e) {
       if (token !== state.token) return;
       state.info = null;
-      say(e && e.userMessage ? e.userMessage : '分割できませんでした。別の動画で試してください。', true);
+      say(e && e.userMessage ? e.userMessage : '動画の準備を完了できませんでした：' + (e.message || e.name || '不明なエラー'), true);
       console.error(e);
     }
+  }
+
+  async function ensureDownloadWorker() {
+    if (!('serviceWorker' in navigator)) throw new Error('Safariでこのページを開いてください。');
+    await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready;
+    for (var attempt = 0; attempt < 8; attempt++) {
+      if (navigator.serviceWorker.controller && await workerVersion()) return;
+      await new Promise(function (resolve) { setTimeout(resolve, 500); });
+    }
+    throw new Error('保存方式を更新しています。ページを一度再読み込みしてください。');
+  }
+  function workerVersion() {
+    return new Promise(function (resolve) {
+      var channel = new MessageChannel();
+      var timer = setTimeout(function () { channel.port1.close(); resolve(false); }, 1500);
+      channel.port1.onmessage = function (e) { clearTimeout(timer); channel.port1.close(); resolve(e.data === 'video-split-v7'); };
+      navigator.serviceWorker.controller.postMessage('export-version', [channel.port2]);
+    });
   }
 
   function render(info, n) {
@@ -100,7 +125,7 @@
       actions.className = 'save-actions';
       var download = document.createElement('a');
       download.className = 'btn small';
-      download.href = p.url;
+      download.href = p.downloadUrl;
       download.download = p.name;
       download.textContent = 'ファイルに保存';
       download.addEventListener('click', function () {
@@ -203,6 +228,17 @@
   });
   Array.prototype.forEach.call(document.querySelectorAll('input[name="mode"]'), function (r) {
     r.addEventListener('change', run);
+  });
+  $('clearTemporary').addEventListener('click', async function () {
+    if (!state.parts.length) return;
+    if (!confirm('全パートの保存が完了していますか？この画面の一時動画を削除します。保存中の場合はキャンセルしてください。')) return;
+    try {
+      await ExportStore.remove(state.parts[0].exportId);
+      state.parts.forEach(function (p) { if (p.url) URL.revokeObjectURL(p.url); });
+      state.parts = [];
+      result.hidden = true;
+      say('この画面で作成した一時動画を削除しました。');
+    } catch (e) { saveStatus('一時動画を削除できませんでした。', true); }
   });
   $('saveAll').addEventListener('click', function () { save(state.parts); });
 
