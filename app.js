@@ -88,7 +88,7 @@
     return new Promise(function (resolve) {
       var channel = new MessageChannel();
       var timer = setTimeout(function () { channel.port1.close(); resolve(false); }, 1500);
-      channel.port1.onmessage = function (e) { clearTimeout(timer); channel.port1.close(); resolve(e.data === 'video-split-v7'); };
+      channel.port1.onmessage = function (e) { clearTimeout(timer); channel.port1.close(); resolve(e.data === 'video-split-v8'); };
       navigator.serviceWorker.controller.postMessage('export-version', [channel.port2]);
     });
   }
