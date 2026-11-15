@@ -126,7 +126,8 @@
       var download = document.createElement('a');
       download.className = 'btn small';
       download.href = p.downloadUrl;
-      download.download = p.name;
+      download.target = '_blank';
+      download.rel = 'noopener';
       download.textContent = 'ファイルに保存';
       download.addEventListener('click', function () {
         saveStatus('パート' + (i + 1) + 'のダウンロードを要求しました。Safariのダウンロード一覧をご確認ください。反応がない場合は「動画を開く」をお試しください。');
