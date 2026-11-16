@@ -5,10 +5,14 @@
     var stopped = false;
     self.onmessage = async function (event) {
       if (event.data.cancel) { stopped = true; return; }
-      var job = event.data, parent, access, index = 0, offset = 0, stage = '一時保存の準備';
+      var job = event.data, parent, access, lease, index = 0, offset = 0, stage = '一時保存の準備';
       var BLOCK = 256 * 1024;
       try {
-        parent = await (await navigator.storage.getDirectory()).getDirectoryHandle('video-split-exports', { create: true });
+        var rootDir = await navigator.storage.getDirectory();
+        var leaseFile = await rootDir.getFileHandle('video-split-export.lock', { create: true });
+        lease = await leaseFile.createSyncAccessHandle();
+        parent = await rootDir.getDirectoryHandle('video-split-exports', { create: true });
+        for await (var entry of parent.values()) throw new Error('以前の一時動画が残っています。「一時ファイルの確認・削除」で削除してください。');
         var dir = await parent.getDirectoryHandle(job.id, { create: true });
         var reader = new FileReaderSync();
         for (index = 0; index < job.parts.length; index++) {
@@ -59,15 +63,18 @@
           await access.close(); access = null;
           self.postMessage({ progress: true, part: index + 1, total: job.parts.length, done: offset, size: part.size });
         }
+        await lease.close(); lease = null;
         self.postMessage({ complete: true });
       } catch (error) {
         if (access) { try { await access.close(); } catch (_) {} }
+        if (lease) { try { await lease.close(); } catch (_) {} }
         if (parent) { try { await parent.removeEntry(job.id, { recursive: true }); } catch (_) {} }
         self.postMessage({ error: true, name: error.name, message: error.message, stage: stage, part: index + 1, offset: offset });
       }
     };
   }
   async function prepare(parts, onProgress, cancelled) {
+    if (parts.length !== 1) throw new Error('書き出せる一時動画は1本だけです。');
     if (!navigator.storage || !navigator.storage.getDirectory || typeof Worker === 'undefined') throw new Error('このブラウザーでは端末内の保存処理を開始できません。');
     var id = crypto.randomUUID();
     var worker, timer, workerURL;
