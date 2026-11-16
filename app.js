@@ -1,256 +1,134 @@
 (function () {
   'use strict';
-
-  var MAX_SEC = 300;
   var $ = function (id) { return document.getElementById(id); };
-  var fileInput = $('file'), msg = $('msg'), result = $('result');
-  var state = { file: null, info: null, token: 0, parts: [] };
-  var sharing = false;
-
-  function fmtTime(sec) {
-    sec = Math.max(0, Math.round(sec));
-    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-    var ss = (s < 10 ? '0' : '') + s;
-    if (h) return h + ':' + (m < 10 ? '0' : '') + m + ':' + ss;
-    return m + ':' + ss;
+  var input = $('file'), state = { source: null, info: null, plans: [], active: null, busy: false, finished: {} };
+  function time(s) { s = Math.round(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+  function size(n) { return n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : Math.round(n / 1e6) + ' MB'; }
+  function say(text, error) { $('msg').textContent = text; $('msg').hidden = !text; $('msg').className = 'msg' + (error ? ' error' : ''); }
+  function status(text, error) { $('saveStatus').textContent = text; $('saveStatus').className = 'msg' + (error ? ' error' : ''); }
+  function controls() {
+    input.disabled = state.busy || !!state.active;
+    document.querySelectorAll('input[name="mode"]').forEach(function (el) { el.disabled = state.busy || !!state.active; });
+    $('clearTemporary').hidden = !state.active;
+    $('clearTemporary').disabled = state.busy || !state.active || !state.active.requested;
   }
-  function fmtSize(bytes) {
-    if (bytes >= 1e9) return (bytes / 1e9).toFixed(2) + ' GB';
-    return Math.max(1, Math.round(bytes / 1e6)) + ' MB';
+  async function hasTemporary() {
+    var root = await navigator.storage.getDirectory(), dir;
+    try { dir = await root.getDirectoryHandle('video-split-exports'); }
+    catch (e) { if (e.name === 'NotFoundError') return false; throw e; }
+    for await (var entry of dir.values()) return true;
+    return false;
   }
-  function say(text, isError) {
-    msg.hidden = !text;
-    msg.textContent = text || '';
-    msg.className = 'msg' + (isError ? ' error' : '');
+  function leftover() {
+    say('以前の一時動画が残っています。下の「一時ファイルの確認・削除」で削除してから、この画面で書き出してください。追加の動画は作っていません。', true);
   }
-  function mode() {
-    return document.querySelector('input[name="mode"]:checked').value;
-  }
-  function baseName(name) {
-    var b = String(name || 'video').replace(/\.[^.]+$/, '').replace(/[^\w\-]+/g, '_');
-    return b || 'video';
-  }
-
-  async function run() {
-    if (!state.file) return;
-    var token = ++state.token;
-    result.hidden = true;
-    say('動画を調べています…');
-    try {
-      if (!state.info) state.info = await VideoSplit.analyze(state.file);
-      if (token !== state.token) return;
-      var info = state.info;
-      var segs = VideoSplit.plan(info, { mode: mode(), maxSec: MAX_SEC });
-
-      if (mode() === 'max' && segs.length === 1) {
-        say('この動画は ' + fmtTime(info.duration) + ' で、5分以内です。分ける必要はありません。');
-        return;
-      }
-      say('分割準備ができました。');
-      var built = await VideoSplit.build(info, segs, baseName(state.file.name), function (done, total) {
-        if (token === state.token) {
-          say(done === total ? '分割が完了しました。結果を表示しています…' :
-            '分割中：' + (done + 1) + ' / ' + total + ' 本目を処理しています…');
-        }
-      });
-      if (token !== state.token) return;
-      await ensureDownloadWorker();
-      var prepared = await ExportStore.prepare(built, function (part, total, done, size) {
-        if (token === state.token) say('保存用ファイルを書き出しています：' + part + ' / ' + total + ' 本目・' + Math.round(done / size * 100) + '％');
-      }, function () { return token !== state.token; });
-      if (token !== state.token) {
-        await ExportStore.remove(prepared[0].exportId);
-        return;
-      }
-      state.parts = prepared;
-      render(info, segs.length);
-      var over = state.parts.some(function (p) { return p.dur > MAX_SEC; });
-      say(over ? '5分を超えるパートがあります。「5分以内に自動」を選ぶと、すべて5分以内になります。' : '');
-    } catch (e) {
-      if (token !== state.token) return;
-      state.info = null;
-      say(e && e.userMessage ? e.userMessage : '動画の準備を完了できませんでした：' + (e.message || e.name || '不明なエラー'), true);
-      console.error(e);
-    }
-  }
-
-  async function ensureDownloadWorker() {
-    if (!('serviceWorker' in navigator)) throw new Error('Safariでこのページを開いてください。');
-    await navigator.serviceWorker.register('sw.js');
+  async function workerReady() {
+    if (!navigator.serviceWorker) throw new Error('Safariで開いてください。');
+    var reg = await navigator.serviceWorker.register('sw.js');
+    await reg.update();
     await navigator.serviceWorker.ready;
-    for (var attempt = 0; attempt < 8; attempt++) {
-      if (navigator.serviceWorker.controller && await workerVersion()) return;
-      await new Promise(function (resolve) { setTimeout(resolve, 500); });
-    }
-    throw new Error('保存方式を更新しています。ページを一度再読み込みしてください。');
-  }
-  function workerVersion() {
-    return new Promise(function (resolve) {
-      var channel = new MessageChannel();
-      var timer = setTimeout(function () { channel.port1.close(); resolve(false); }, 1500);
-      channel.port1.onmessage = function (e) { clearTimeout(timer); channel.port1.close(); resolve(e.data === 'video-split-v8'); };
-      navigator.serviceWorker.controller.postMessage('export-version', [channel.port2]);
-    });
-  }
-
-  function render(info, n) {
-    $('fDur').textContent = fmtTime(info.duration);
-    $('fSize').textContent = fmtSize(state.file.size);
-    $('fParts').textContent = n + '本';
-
-    var tl = $('timeline');
-    tl.textContent = '';
-    state.parts.forEach(function (p, i) {
-      var d = document.createElement('div');
-      d.className = 'seg';
-      d.style.flex = String(p.dur) + ' 1 0';
-      d.textContent = (i + 1) + ' · ' + fmtTime(p.dur);
-      tl.appendChild(d);
-    });
-
-    var ul = $('parts');
-    ul.textContent = '';
-    state.parts.forEach(function (p, i) {
-      var li = document.createElement('li');
-      li.className = 'part';
-      var info2 = document.createElement('div');
-      info2.className = 'info';
-      var b = document.createElement('b');
-      b.textContent = 'パート' + (i + 1) + '　' + fmtTime(p.dur);
-      var s = document.createElement('span');
-      s.textContent = fmtTime(p.start) + ' から ・ ' + fmtSize(p.size);
-      info2.appendChild(b); info2.appendChild(s);
-      if (!p.url) p.url = URL.createObjectURL(p.blob);
-      var actions = document.createElement('div');
-      actions.className = 'save-actions';
-      var download = document.createElement('a');
-      download.className = 'btn small';
-      download.href = p.downloadUrl;
-      download.target = '_blank';
-      download.rel = 'noopener';
-      download.textContent = 'ファイルに保存';
-      download.addEventListener('click', function () {
-        saveStatus('パート' + (i + 1) + 'のダウンロードを要求しました。Safariのダウンロード一覧をご確認ください。反応がない場合は「動画を開く」をお試しください。');
-      });
-      actions.appendChild(download);
-      var preview = document.createElement('a');
-      preview.href = p.url;
-      preview.target = '_blank';
-      preview.rel = 'noopener';
-      preview.textContent = '動画を開く';
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn ghost small';
-      btn.textContent = '共有して保存';
-      btn.addEventListener('click', function () { save([p]); });
-      actions.appendChild(btn);
-      actions.appendChild(preview);
-      li.appendChild(info2); li.appendChild(actions);
-      ul.appendChild(li);
-    });
-    $('saveAll').textContent = n + '本をまとめて共有';
-    saveStatus('各パートの「ファイルに保存」で1本ずつ保存できます。写真アプリに入れる場合は「共有して保存」を押してください。');
-    result.hidden = false;
-  }
-
-  function saveStatus(text, isError) {
-    var status = $('saveStatus');
-    status.hidden = !text;
-    status.textContent = text || '';
-    status.className = 'msg' + (isError ? ' error' : '');
-  }
-
-  // 共有とダウンロードは独立させる。失敗後に自動クリックしない。
-  async function save(parts) {
-    if (!parts.length) {
-      saveStatus('保存する動画がありません。動画を選び直してください。', true);
-      return;
-    }
-    if (sharing) {
-      saveStatus('共有画面を準備中です。開いている共有画面を閉じるか、「ファイルに保存」をお使いください。');
-      return;
-    }
-    var token = state.token;
-    var files = parts.map(function (p) { return p.file; });
-    try {
-      if (!navigator.share || !navigator.canShare || !navigator.canShare({ files: files })) {
-        saveStatus('この環境ではこの動画を共有できません。各パートの「ファイルに保存」、または「動画を開く」をお使いください。', true);
-        return;
+    for (var i = 0; i < 10; i++) {
+      if (navigator.serviceWorker.controller) {
+        var version = await new Promise(function (resolve) {
+          var channel = new MessageChannel();
+          var timer = setTimeout(function () { channel.port1.close(); resolve(null); }, 1000);
+          channel.port1.onmessage = function (e) { clearTimeout(timer); channel.port1.close(); resolve(e.data); };
+          navigator.serviceWorker.controller.postMessage('export-version', [channel.port2]);
+        });
+        if (version === 'video-split-v9') return;
       }
-      sharing = true;
-      saveStatus('共有画面を開いています。表示されない場合は「ファイルに保存」をお使いください。');
-      await navigator.share({ files: files });
-      if (token === state.token) saveStatus('共有画面の操作が終了しました。選択した保存先で動画をご確認ください。');
-    } catch (e) {
-      if (token !== state.token) return;
-      var code = e && e.name ? e.name : 'Error';
-      saveStatus(code === 'AbortError' ?
-        '共有が中断されました。保存は確認できていません。「ファイルに保存」なら共有画面を使わずに保存できます。' :
-        '共有画面を開けませんでした（' + code + '）。各パートの「ファイルに保存」をお使いください。', true);
-      console.error(e);
-    } finally {
-      sharing = false;
+      await new Promise(function (resolve) { setTimeout(resolve, 300); });
     }
+    throw new Error('保存処理の更新を確認できませんでした。通信を確認してページを開き直してください。');
   }
-
-  // iPhoneの「ファイル」からMP4/MOV/M4Vを選ぶ。写真ライブラリ経由は不要。
-  fileInput.addEventListener('click', function () {
-    // 同じ動画の再選択でも change が届くようにする。
-    fileInput.value = '';
-    say('「ファイル」から動画を選んでください。選択後、自動で解析を開始します。');
-  });
-  fileInput.addEventListener('cancel', function () {
-    say('ファイルが選択されませんでした。分割処理は開始していません。', true);
-  });
-  fileInput.addEventListener('input', function () {
-    // OSがchangeを通知する前でも、選択状態が分かるようにする。
-    if (fileInput.files && fileInput.files.length) {
-      var selected = fileInput.files[0];
-      say('動画の選択を受け取りました：' + selected.name + '（' + fmtSize(selected.size) + '）');
-    }
-  });
-  fileInput.addEventListener('change', function () {
-    var f = fileInput.files && fileInput.files[0];
-    if (!f) {
-      say('ファイルを受け取れませんでした。分割処理はまだ始まっていません。', true);
-      return;
-    }
-    // accept を付けないことでiOSのファイルブラウザを使いやすくする。
-    // 代わりにアプリ内で動画形式を確認する。
-    if (!/\.(mp4|mov|m4v)$/i.test(f.name) &&
-        !/^(video\/mp4|video\/quicktime|video\/x-m4v)$/i.test(f.type)) {
-      say('MP4・MOV・M4Vの動画ファイルを選んでください。', true);
-      return;
-    }
-    state.parts.forEach(function (p) { if (p.url) URL.revokeObjectURL(p.url); });
-    state.parts = []; state.info = null; state.file = f;
-    say('動画を受け取りました：' + f.name + '（' + fmtSize(f.size) + '）。解析します…');
-    run();
-  });
-  Array.prototype.forEach.call(document.querySelectorAll('input[name="mode"]'), function (r) {
-    r.addEventListener('change', run);
-  });
-  $('clearTemporary').addEventListener('click', async function () {
-    if (!state.parts.length) return;
-    if (!confirm('全パートの保存が完了していますか？この画面の一時動画を削除します。保存中の場合はキャンセルしてください。')) return;
+  async function analyze() {
+    if (state.busy || state.active || !state.source) return;
+    state.busy = true; controls(); $('result').hidden = true; state.plans = []; state.finished = {};
+    say('動画の分け方を調べています。まだ一時動画は作りません。');
     try {
-      await ExportStore.remove(state.parts[0].exportId);
-      state.parts.forEach(function (p) { if (p.url) URL.revokeObjectURL(p.url); });
-      state.parts = [];
-      result.hidden = true;
-      say('この画面で作成した一時動画を削除しました。');
-    } catch (e) { saveStatus('一時動画を削除できませんでした。', true); }
-  });
-  $('saveAll').addEventListener('click', function () { save(state.parts); });
-
-  // ホーム画面に追加済みなら案内を隠す
-  var standalone = window.navigator.standalone === true ||
-    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
-  $('install').hidden = standalone;
-
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function () {
-      navigator.serviceWorker.register('sw.js').catch(function () {});
-    });
+      if (!state.info) state.info = await VideoSplit.analyze(state.source);
+      var mode = document.querySelector('input[name="mode"]:checked').value;
+      var segments = VideoSplit.plan(state.info, { mode: mode, maxSec: 300 });
+      var name = state.source.name.replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '_') || 'video';
+      state.plans = await VideoSplit.build(state.info, segments, name);
+      say('保存するパートを選んでください。1本ずつ書き出します。');
+      status('①書き出す → ②ファイルに保存 → ③保存を確認して一時動画を削除');
+    } catch (e) { say(e.userMessage || e.message, true); }
+    finally { state.busy = false; render(); controls(); }
   }
+  async function prepare(index) {
+    if (state.busy || state.active) return;
+    state.busy = true; controls(); render();
+    try {
+      await workerReady();
+      if (await hasTemporary()) { leftover(); return; }
+      say('パート' + (index + 1) + 'だけを書き出しています…');
+      var output = await ExportStore.prepare([state.plans[index]], function (_, total, done, bytes) {
+        say('パート' + (index + 1) + 'を書き出しています：' + Math.round(done / bytes * 100) + '％');
+      }, function () { return false; });
+      state.active = { index: index, part: output[0], requested: false };
+      say('パート' + (index + 1) + 'の準備ができました。一時動画はこの1本だけです。');
+      status('「ファイルに保存」を押し、Safariのダウンロード完了と保存先の動画を確認してください。');
+    } catch (e) { say('パート' + (index + 1) + 'を準備できませんでした。' + (e.userMessage || e.message), true); }
+    finally { state.busy = false; render(); controls(); }
+  }
+  async function clearActive() {
+    if (!state.active || state.busy) return;
+    var current = state.active;
+    if (!confirm('パート' + (current.index + 1) + 'の保存先で動画を確認しましたか？この一時動画を削除します。保存中・保存失敗の場合はキャンセルしてください。')) return;
+    state.busy = true; controls(); render();
+    try {
+      try { await ExportStore.remove(current.part.exportId); }
+      catch (e) { if (e.name !== 'NotFoundError') throw e; }
+      var stillExists = false;
+      try {
+        var root = await navigator.storage.getDirectory();
+        var parent = await root.getDirectoryHandle('video-split-exports');
+        await parent.getDirectoryHandle(current.part.exportId);
+        stillExists = true;
+      } catch (e) { if (e.name !== 'NotFoundError') throw e; }
+      if (stillExists) throw new Error('一時動画の削除を確認できませんでした。');
+      state.finished[current.index] = true; state.active = null;
+      say('パート' + (current.index + 1) + 'の一時動画を削除しました。保存済みの動画は変更していません。');
+      status('次に保存するパートを選んでください。');
+    } catch (e) { status('一時動画を削除できませんでした。' + e.message, true); }
+    finally { state.busy = false; render(); controls(); }
+  }
+  function render() {
+    $('result').hidden = !state.plans.length;
+    if (!state.plans.length) return;
+    $('fDur').textContent = time(state.info.duration); $('fSize').textContent = size(state.source.size); $('fParts').textContent = state.plans.length + '本';
+    $('timeline').textContent = ''; $('parts').textContent = '';
+    state.plans.forEach(function (p, i) {
+      var seg = document.createElement('div'); seg.className = 'seg'; seg.style.flex = String(p.dur) + ' 1 0'; seg.textContent = (i + 1) + ' · ' + time(p.dur); $('timeline').appendChild(seg);
+      var li = document.createElement('li'); li.className = 'part';
+      var info = document.createElement('div'); info.className = 'info';
+      var title = document.createElement('b'); title.textContent = 'パート' + (i + 1) + '　' + time(p.dur);
+      var detail = document.createElement('span'); detail.textContent = time(p.start) + ' から ・ ' + size(p.size) + (state.finished[i] ? ' ・ 保存確認済み／一時動画削除済み' : '');
+      info.appendChild(title); info.appendChild(detail); li.appendChild(info);
+      if (state.active && state.active.index === i) {
+        if (!state.busy) {
+          var link = document.createElement('a'); link.className = 'btn small'; link.href = state.active.part.downloadUrl; link.target = '_blank'; link.rel = 'noopener'; link.textContent = '② ファイルに保存';
+          link.addEventListener('click', function () { state.active.requested = true; controls(); status('ダウンロードを要求しました。完了後、保存先で動画を確認してから「③ 保存を確認したので一時動画を削除」を押してください。保存の成功は自動判定できません。'); });
+          li.appendChild(link);
+        }
+      } else {
+        var button = document.createElement('button'); button.type = 'button'; button.className = 'btn small'; button.textContent = '① このパートを書き出す'; button.disabled = state.busy || !!state.active;
+        button.addEventListener('click', function () { prepare(i); }); li.appendChild(button);
+      }
+      $('parts').appendChild(li);
+    });
+    $('clearTemporary').disabled = state.busy || !state.active || !state.active.requested;
+  }
+  input.addEventListener('click', function () { input.value = ''; });
+  input.addEventListener('change', function () {
+    if (state.busy || state.active) return;
+    var file = input.files && input.files[0]; if (!file) return;
+    if (!/\.(mp4|mov|m4v)$/i.test(file.name)) { say('MP4・MOV・M4Vを選んでください。', true); return; }
+    state.source = file; state.info = null; analyze();
+  });
+  document.querySelectorAll('input[name="mode"]').forEach(function (el) { el.addEventListener('change', analyze); });
+  $('clearTemporary').addEventListener('click', clearActive);
+  $('install').hidden = window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  controls();
 })();
