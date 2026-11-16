@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>動画ぶんかつ｜一時ファイルの削除</title>
+<style>body{font:17px/1.65 system-ui,sans-serif;max-width:620px;margin:36px auto;padding:0 22px}h1{font-size:26px}button{font:inherit;font-weight:700;border:0;border-radius:12px;padding:16px 20px;background:#1767d5;color:white;cursor:pointer;width:100%;margin:10px 0}button:disabled{opacity:.45;cursor:default}.panel{padding:18px;border:1px solid #8887;border-radius:14px;margin:20px 0}#status{white-space:pre-wrap;overflow-wrap:anywhere}.error{color:#c53c20}small{opacity:.75}</style>
+<main><h1>動画アプリの一時ファイルを削除</h1>
+<p>動画ぶんかつがSafari内に作った一時動画だけを削除します。元動画と「ファイル」「写真」に保存済みの動画は削除しません。</p>
+<p>先に、動画ぶんかつのほかのタブやホーム画面のアプリを閉じてください。このページでは分割処理は始まりません。</p>
+<div class="panel"><div id="status" role="status" aria-live="polite">一時ファイルを確認しています…</div></div>
+<button id="remove" disabled>一時ファイルをすべて削除する</button>
+<button id="check" type="button">残っているか確認する</button>
+<p><small>未保存の分割動画も削除されます。削除後の空き容量表示は、この画面ではなくiPhoneの設定で確認してください。</small></p></main>
+<script>
+'use strict';
+const TEMP_DIRECTORY = 'video-split-exports';
+const statusBox = document.getElementById('status');
+const removeButton = document.getElementById('remove');
+const checkButton = document.getElementById('check');
+let busy = false;
+function show(text, error) { statusBox.textContent = text; statusBox.className = error ? 'error' : ''; }
+function sizeText(bytes) { return (bytes / 1000000).toFixed(1) + ' MB'; }
+async function temporaryDirectory(root) {
+  try { return await root.getDirectoryHandle(TEMP_DIRECTORY); }
+  catch (error) { if (error.name === 'NotFoundError') return null; throw error; }
+}
+async function countFiles(dir) {
+  let count = 0, bytes = 0;
+  for await (const entry of dir.values()) {
+    if (entry.kind === 'directory') { const child = await countFiles(entry); count += child.count; bytes += child.bytes; }
+    else if (entry.kind === 'file') { const file = await entry.getFile(); count++; bytes += file.size; }
+  }
+  return { count, bytes };
+}
+async function storageRoot() {
+  if (!navigator.storage || !navigator.storage.getDirectory) throw new Error('この画面では一時保存領域を開けません。同じSafariで開いてください。');
+  return navigator.storage.getDirectory();
+}
+async function inspect() {
+  if (busy) return;
+  busy = true; removeButton.disabled = true; checkButton.disabled = true;
+  try {
+    const root = await storageRoot(), dir = await temporaryDirectory(root);
+    if (!dir) { show('このSafariには、動画ぶんかつの一時保存フォルダが見つかりません。\n設定に容量が残っていても、このページから削除できる対象はありません。'); return; }
+    const result = await countFiles(dir);
+    show('残っている一時ファイル：' + result.count + '個\n合計：' + sizeText(result.bytes) + '\n下のボタンでこの一時保存フォルダを削除します。');
+    removeButton.disabled = false;
+  } catch (error) { show('確認できませんでした。\n' + error.name + ': ' + error.message, true); }
+  finally { busy = false; checkButton.disabled = false; }
+}
+async function removeTemporary() {
+  if (busy) return;
+  busy = true; removeButton.disabled = true; checkButton.disabled = true;
+  try {
+    const root = await storageRoot();
+    show('一時ファイルを削除しています…');
+    try { await root.removeEntry(TEMP_DIRECTORY, { recursive: true }); }
+    catch (error) { if (error.name !== 'NotFoundError') throw error; }
+    if (await temporaryDirectory(root)) {
+      show('一時保存フォルダがまだ残っています。削除完了は確認できませんでした。', true);
+      removeButton.disabled = false;
+    } else {
+      show('一時保存フォルダの削除を確認しました。\n元動画と保存済みの動画は変更していません。\n分割アプリはまだ開かず、設定で容量を確認してください。');
+    }
+  } catch (error) {
+    show('削除できませんでした。\n' + error.name + ': ' + error.message + '\nこの表示をそのままお知らせください。', true);
+    removeButton.disabled = false;
+  } finally { busy = false; checkButton.disabled = false; }
+}
+removeButton.addEventListener('click', removeTemporary);
+checkButton.addEventListener('click', inspect);
+inspect();
+</script></html>
