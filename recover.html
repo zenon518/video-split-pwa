@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>一時動画の保存を復旧</title>
+<style>body{font-family:system-ui,sans-serif;max-width:680px;margin:0 auto;padding:24px;background:#f4f5f7;color:#15171b;line-height:1.65}h1{font-size:25px}.card{background:white;border:1px solid #d5d8df;border-radius:18px;padding:20px;margin:18px 0;overflow-wrap:anywhere}button,.save{display:inline-block;font:inherit;font-weight:700;padding:15px 20px;border:0;border-radius:12px;background:#17191e;color:white;cursor:pointer;text-decoration:none}button:disabled{opacity:.45}.status{white-space:pre-wrap}.error{color:#b42318}.muted{color:#596171;font-size:14px}[hidden]{display:none!important}</style></head>
+<body><h1>一時動画の保存を復旧</h1><p>すでに書き出した一時動画を読み出し、通常の保存ボタンとは別の経路で保存します。動画の再分割・一時ファイルの削除は行いません。</p><p class="muted">元の分割アプリと同じSafariで開いてください。ダウンロード中はこのページを開いたままにしてください。</p><p id="scan" role="status">一時動画を探しています…</p><div id="files"></div><p class="muted">読み出し確認は動画の再生検証ではありません。保存ボタンを押しただけでは保存完了とは判定しません。保存先の動画を確認するまで、一時動画を削除しないでください。</p>
+<script>
+(function(){
+'use strict';
+var scan=document.getElementById('scan'),list=document.getElementById('files'),busy=false;
+function mb(n){return (n/1000000).toFixed(1)+' MB';}
+function errorText(e){return (e.name||'Error')+': '+(e.message||String(e));}
+function card(handle,name){
+ var panel=document.createElement('section');panel.className='card';
+ var title=document.createElement('h2');title.textContent=name;title.style.fontSize='18px';
+ var status=document.createElement('p');status.className='status';status.setAttribute('role','status');
+ var check=document.createElement('button');check.textContent='① 保存前に読み出し確認';check.type='button';
+ var save=document.createElement('a');save.className='save';save.textContent='② 別方式でファイルに保存';save.hidden=true;save.download=name;save.target='_blank';save.rel='noopener';
+ panel.append(title,status,check,save);list.appendChild(panel);
+ handle.getFile().then(function(f){status.textContent='一時動画：'+mb(f.size);if(!f.size){check.disabled=true;status.textContent='一時動画は0バイトです。このファイルからは復旧できません。';}}).catch(function(e){status.textContent='ファイル情報の取得失敗：'+errorText(e);check.disabled=true;});
+ check.addEventListener('click',async function(){
+  if(busy)return;busy=true;var buttons=list.querySelectorAll('button');buttons.forEach(function(b){b.disabled=true;});var offset=0;
+  try{
+   var file=await handle.getFile();if(!file.size)throw new Error('一時動画が0バイトです。');
+   status.className='status';
+   while(offset<file.size){
+    var end=Math.min(offset+256*1024,file.size);
+    var bytes=await file.slice(offset,end).arrayBuffer();
+    if(bytes.byteLength!==end-offset)throw new Error('読み出しサイズが一致しません。');
+    offset=end;bytes=null;
+    if(offset%(4*1024*1024)===0||offset===file.size){status.textContent='読み出し確認：'+Math.floor(offset/file.size*100)+'％（'+mb(offset)+'／'+mb(file.size)+'）';await new Promise(function(resolve){setTimeout(resolve,0);});}
+   }
+   // Use the existing disk-backed File directly; do not assemble or copy its bytes into a new Blob.
+   save.href=URL.createObjectURL(file);save.hidden=false;check.hidden=true;
+   status.textContent='全体 '+mb(file.size)+' を読み出せました。「② 別方式でファイルに保存」を押してください。';
+  }catch(e){status.className='status error';status.textContent='読み出し失敗（'+mb(offset)+'まで）：'+errorText(e);}
+  finally{busy=false;buttons.forEach(function(b){b.disabled=false;});}
+ });
+ save.addEventListener('click',function(){status.textContent='別方式のダウンロードを要求しました。Safariのダウンロード一覧と保存先で確認してください。まだ一時動画は削除していません。';});
+}
+(async function(){
+ try{
+  if(!navigator.storage||!navigator.storage.getDirectory)throw new Error('このブラウザーでは一時動画を参照できません。');
+  var root=await navigator.storage.getDirectory(),parent;
+  try{parent=await root.getDirectoryHandle('video-split-exports');}
+  catch(e){if(e.name==='NotFoundError'){scan.textContent='このSafariの保存領域に一時動画は見つかりませんでした。元の分割アプリと同じSafariで開いているか確認してください。';return;}throw e;}
+  var count=0;
+  for await(var dir of parent.values()){
+   if(dir.kind!=='directory')continue;
+   for await(var file of dir.values()){if(file.kind==='file'){card(file,file.name);count++;}}
+  }
+  scan.textContent=count?'一時動画 '+count+'本が見つかりました。保存できなかったパートを選んでください。':'一時動画は見つかりませんでした。再書き出しはまだ行わないでください。';
+ }catch(e){scan.className='error';scan.textContent='一時動画の確認失敗：'+errorText(e);}
+})();
+})();
+</script></body></html>
