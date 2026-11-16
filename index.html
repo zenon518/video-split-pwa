@@ -58,6 +58,7 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
 .mode input:focus-visible + label { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 .btn { appearance: none; border: 0; border-radius: 12px; padding: 15px 18px; font: inherit; font-weight: 700; background: var(--ink); color: var(--on-ink); text-align: center; cursor: pointer; display: block; width: 100%; }
+.btn:disabled { opacity: .4; cursor: default; }
 .btn:focus-visible { outline: 3px solid var(--cut); outline-offset: 2px; }
 .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 600; margin: 0; }
 .btn.small { padding: 9px 14px; width: auto; font-size: 14px; }
@@ -103,7 +104,7 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
   <header>
     <h1>動画ぶんかつ</h1>
     <p class="sub">長い動画を、5分以内の動画に自動で分けます。動画は端末の外に出ません。</p>
-    <p class="sub">保存修正版 v8 ／ 全パートを書き出してから保存</p>
+    <p class="sub">保存修正版 v9 ／ 1本ずつ保存・一時動画を削除</p>
   </header>
 
   <section class="panel" aria-label="分け方と動画の選択">
@@ -118,7 +119,8 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
     <input id="file" type="file" aria-label="動画ファイルを選ぶ">
     <p class="note">上の標準ボタンから「ファイルを選択」を選んでください。MP4・MOV・M4Vに対応。動画はアップロードされません。</p>
     <p class="msg" id="msg" role="status" hidden></p>
-    <p class="note">長い動画の分割中は、この画面を開いたままにしてください。</p>
+    <p class="note">書き出し・保存中はこの画面を開いたままにしてください。</p>
+    <a href="cleanup.html" target="_blank" rel="noopener">一時ファイルの確認・削除</a>
   </section>
 
   <section class="panel" id="result" aria-label="分割結果" hidden>
@@ -130,10 +132,9 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
     <div class="timeline" id="timeline" aria-hidden="true"></div>
     <ul class="parts" id="parts"></ul>
     <p class="msg" id="saveStatus" role="status" aria-live="polite"></p>
-    <p class="note">全パートを端末内に一時保存済みです。「ファイルに保存」を1本ずつ押してください。保存中はこのページを開いたままにしてください。</p>
-    <button class="btn ghost" id="clearTemporary" type="button">保存完了後、一時動画を削除</button>
-    <button class="btn ghost" id="saveAll" type="button">まとめて共有</button>
-    <p class="note" id="saveHelp">「ファイルに保存」はSafariのダウンロード先へ保存します。写真アプリに入れる場合は「共有して保存」から「ビデオを保存」を選んでください。共有が開かないときは「動画を開く」もお試しください。</p>
+    <p class="note">一時動画は1本だけ作ります。保存先で動画を確認し、一時動画を削除してから次のパートに進んでください。</p>
+    <button class="btn ghost" id="clearTemporary" type="button">③ 保存を確認したので一時動画を削除</button>
+    <p class="note" id="saveHelp">「ファイルに保存」はSafariのダウンロード先へ保存します。保存の成功は自動判定できません。失敗時は一時動画を消さず、不要になった場合だけ「一時ファイルの確認・削除」を使ってください。</p>
     <p class="note">再エンコードはしないので画質は変わりません。切れ目は直前のキーフレームに合わせるため、数秒のずれが出ます。</p>
   </section>
 
@@ -145,8 +146,8 @@ h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: 0.02em; }
     </ol>
   </section>
 </main>
-<script src="split.js?v=8"></script>
-<script src="export-store.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="split.js?v=9"></script>
+<script src="export-store.js?v=9"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>
